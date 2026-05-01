@@ -2,7 +2,7 @@
 #
 # Two responsibilities:
 #   1. (schedule/manual) Merge upstream anthropics/skills into dev
-#   2. (push to dev)     Notify odin-fastapi to update its submodule pointer
+#   2. (push to dev/main) Notify odin-fastapi to update its submodule pointer
 #
 # Prerequisites:
 #   - The GitHub App (RELEASE_SYNC_APP_ID) must be installed on both
@@ -14,7 +14,7 @@ on:
   schedule:
     - cron: "15 9 * * 1"
   push:
-    branches: [dev]
+    branches: [dev, main]
   workflow_dispatch:
 
 jobs:
