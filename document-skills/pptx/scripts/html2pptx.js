@@ -17,7 +17,7 @@
  *   - Handles CSS gradients, borders, and margins
  *
  * VALIDATION:
- *   - Uses body width/height from HTML for viewport sizing
+ *   - Starts the browser viewport from the PPTX layout (when available), then syncs to HTML body size
  *   - Throws error if HTML dimensions don't match presentation layout
  *   - Throws error if content overflows body (with overflow details)
  *
@@ -26,24 +26,103 @@
  */
 
 const { chromium } = require('playwright');
+const fs = require('fs/promises');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const sharp = require('sharp');
 
 const PT_PER_PX = 0.75;
 const PX_PER_IN = 96;
 const EMU_PER_IN = 914400;
 
+function getLayoutViewport(pres) {
+  if (!pres?.presLayout) return null;
+  const layoutWidthInches = pres.presLayout.width / EMU_PER_IN;
+  const layoutHeightInches = pres.presLayout.height / EMU_PER_IN;
+  const width = Math.round(layoutWidthInches * PX_PER_IN);
+  const height = Math.round(layoutHeightInches * PX_PER_IN);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
+}
+
+function formatOffender(offender) {
+  let label = offender.tag;
+  if (offender.id) label += `#${offender.id}`;
+  if (offender.className) {
+    const classes = offender.className.trim().split(/\s+/).filter(Boolean).slice(0, 3);
+    if (classes.length > 0) label += `.${classes.join('.')}`;
+  }
+  return `<${label}>`;
+}
+
+function sanitizeForFilename(value) {
+  return String(value).replace(/[^a-zA-Z0-9._-]+/g, '_');
+}
+
 // Helper: Get body dimensions and check for overflow
 async function getBodyDimensions(page) {
   const bodyDimensions = await page.evaluate(() => {
     const body = document.body;
     const style = window.getComputedStyle(body);
+    const bodyRect = body.getBoundingClientRect();
+
+    const offenders = [];
+    const elements = Array.from(body.querySelectorAll('*'));
+    for (const el of elements) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+
+      const overflowRight = rect.right - bodyRect.right;
+      const overflowBottom = rect.bottom - bodyRect.bottom;
+      const overflowLeft = bodyRect.left - rect.left;
+      const overflowTop = bodyRect.top - rect.top;
+
+      const overflowX = Math.max(0, overflowRight, overflowLeft);
+      const overflowY = Math.max(0, overflowBottom, overflowTop);
+
+      if (overflowX <= 1 && overflowY <= 1) continue;
+
+      const text = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+
+      offenders.push({
+        tag: el.tagName.toLowerCase(),
+        id: el.id || null,
+        className: typeof el.className === 'string' ? el.className : null,
+        text: text || null,
+        overflowPx: {
+          x: overflowX,
+          y: overflowY,
+          right: Math.max(0, overflowRight),
+          bottom: Math.max(0, overflowBottom),
+          left: Math.max(0, overflowLeft),
+          top: Math.max(0, overflowTop),
+        },
+      });
+    }
+
+    offenders.sort(
+      (a, b) => Math.max(b.overflowPx.x, b.overflowPx.y) - Math.max(a.overflowPx.x, a.overflowPx.y)
+    );
 
     return {
       width: parseFloat(style.width),
       height: parseFloat(style.height),
       scrollWidth: body.scrollWidth,
-      scrollHeight: body.scrollHeight
+      scrollHeight: body.scrollHeight,
+      boxSizing: style.boxSizing,
+      padding: {
+        top: parseFloat(style.paddingTop),
+        right: parseFloat(style.paddingRight),
+        bottom: parseFloat(style.paddingBottom),
+        left: parseFloat(style.paddingLeft),
+      },
+      margin: {
+        top: parseFloat(style.marginTop),
+        right: parseFloat(style.marginRight),
+        bottom: parseFloat(style.marginBottom),
+        left: parseFloat(style.marginLeft),
+      },
+      overflowOffenders: offenders.slice(0, 8),
     };
   });
 
@@ -59,7 +138,44 @@ async function getBodyDimensions(page) {
     if (widthOverflowPt > 0) directions.push(`${widthOverflowPt.toFixed(1)}pt horizontally`);
     if (heightOverflowPt > 0) directions.push(`${heightOverflowPt.toFixed(1)}pt vertically`);
     const reminder = heightOverflowPt > 0 ? ' (Remember: leave 0.5" margin at bottom of slide)' : '';
-    errors.push(`HTML content overflows body by ${directions.join(' and ')}${reminder}`);
+
+    const offenders = bodyDimensions.overflowOffenders || [];
+    const offenderLines = offenders.map((offender) => {
+      const parts = [];
+      const rightPt = (offender.overflowPx?.right || 0) * PT_PER_PX;
+      const bottomPt = (offender.overflowPx?.bottom || 0) * PT_PER_PX;
+      const leftPt = (offender.overflowPx?.left || 0) * PT_PER_PX;
+      const topPt = (offender.overflowPx?.top || 0) * PT_PER_PX;
+      if (rightPt > 0.5) parts.push(`right+${rightPt.toFixed(1)}pt`);
+      if (bottomPt > 0.5) parts.push(`bottom+${bottomPt.toFixed(1)}pt`);
+      if (leftPt > 0.5) parts.push(`left+${leftPt.toFixed(1)}pt`);
+      if (topPt > 0.5) parts.push(`top+${topPt.toFixed(1)}pt`);
+      const suffix = offender.text ? `: "${offender.text}"` : '';
+      return `  - ${formatOffender(offender)} ${parts.join(' ')}${suffix}`.trimEnd();
+    });
+
+    const bodyPadding = bodyDimensions.padding || {};
+    const hasBodyPadding = Object.values(bodyPadding).some((value) => (value || 0) > 0);
+    const paddingHint =
+      hasBodyPadding && bodyDimensions.boxSizing !== 'border-box'
+        ? ' Tip: body has padding with box-sizing: content-box; prefer body padding 0 (use an inner .safe container) or set box-sizing: border-box.'
+        : '';
+
+    const bodyMargin = bodyDimensions.margin || {};
+    const hasBodyMargin = Object.values(bodyMargin).some((value) => (value || 0) > 0);
+    const marginHint = hasBodyMargin
+      ? ' Tip: body has a non-zero margin; set html, body { margin: 0; padding: 0; } (see the "Safe Area + CSS Reset" template in html2pptx.md).'
+      : '';
+
+    const offenderBlock =
+      offenderLines.length > 0
+        ? `\nTop overflowing elements:\n${offenderLines.slice(0, 5).join('\n')}`
+        : '';
+
+    errors.push(
+      `HTML content overflows body by ${directions.join(' and ')}${reminder}.` +
+      `${marginHint}${paddingHint}${offenderBlock}`
+    );
   }
 
   return { ...bodyDimensions, errors };
@@ -896,17 +1012,27 @@ async function extractSlideData(page) {
 async function html2pptx(htmlFile, pres, options = {}) {
   const {
     tmpDir = process.env.TMPDIR || '/tmp',
-    slide = null
+    slide = null,
+    debug = false,
+    debugDir = path.join(process.cwd(), 'workspace', 'html2pptx_debug'),
+    context: providedContext = null,
+    browser: providedBrowser = null,
   } = options;
 
-  try {
-    // Use Chrome on macOS, default Chromium on Unix
-    const launchOptions = { env: { TMPDIR: tmpDir } };
-    if (process.platform === 'darwin') {
-      launchOptions.channel = 'chrome';
-    }
+  async function writeDebugScreenshot(page, filePath) {
+    await fs.mkdir(debugDir, { recursive: true });
+    const relative = path.relative(process.cwd(), filePath) || path.basename(filePath);
+    const outPath = path.join(debugDir, `${sanitizeForFilename(relative)}.png`);
+    await page.screenshot({ path: outPath });
+    return outPath;
+  }
 
-    const browser = await chromium.launch(launchOptions);
+  try {
+    let browser;
+    let context;
+    let page;
+    let shouldCloseBrowser = false;
+    let shouldCloseContext = false;
 
     let bodyDimensions;
     let slideData;
@@ -915,13 +1041,45 @@ async function html2pptx(htmlFile, pres, options = {}) {
     const validationErrors = [];
 
     try {
-      const page = await browser.newPage();
+      if (providedContext) {
+        context = providedContext;
+      } else {
+        if (providedBrowser) {
+          browser = providedBrowser;
+        } else {
+          const launchOptions = { env: { ...process.env, TMPDIR: tmpDir } };
+          if (process.platform === 'darwin') {
+            launchOptions.channel = 'chrome';
+          }
+
+          browser = await chromium.launch(launchOptions);
+          shouldCloseBrowser = true;
+        }
+
+        context = await browser.newContext();
+        shouldCloseContext = true;
+      }
+
+      page = await context.newPage();
       page.on('console', (msg) => {
-        // Log the message text to your test runner's console
         console.log(`Browser console: ${msg.text()}`);
       });
 
-      await page.goto(`file://${filePath}`);
+      const layoutViewport = getLayoutViewport(pres);
+      if (layoutViewport) {
+        await page.setViewportSize(layoutViewport);
+      }
+
+      await page.goto(pathToFileURL(filePath).href);
+
+      await page.addStyleTag({
+        content: `
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+        `,
+      });
 
       bodyDimensions = await getBodyDimensions(page);
 
@@ -931,43 +1089,56 @@ async function html2pptx(htmlFile, pres, options = {}) {
       });
 
       slideData = await extractSlideData(page);
+
+      // Collect all validation errors
+      if (bodyDimensions.errors && bodyDimensions.errors.length > 0) {
+        validationErrors.push(...bodyDimensions.errors);
+      }
+
+      const dimensionErrors = validateDimensions(bodyDimensions, pres);
+      if (dimensionErrors.length > 0) {
+        validationErrors.push(...dimensionErrors);
+      }
+
+      const textBoxPositionErrors = validateTextBoxPosition(slideData, bodyDimensions);
+      if (textBoxPositionErrors.length > 0) {
+        validationErrors.push(...textBoxPositionErrors);
+      }
+
+      if (slideData.errors && slideData.errors.length > 0) {
+        validationErrors.push(...slideData.errors);
+      }
+
+      // Throw all errors at once if any exist
+      if (validationErrors.length > 0) {
+        const errorMessage = validationErrors.length === 1
+          ? validationErrors[0]
+          : `Multiple validation errors found:\n${validationErrors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}`;
+
+        const debugSuffix = debug
+          ? `\nDebug screenshot: ${await writeDebugScreenshot(page, filePath)}`
+          : '';
+
+        throw new Error(`${errorMessage}${debugSuffix}`);
+      }
+
+      const targetSlide = slide || pres.addSlide();
+
+      await addBackground(slideData, targetSlide, tmpDir);
+      addElements(slideData, targetSlide, pres);
+
+      return { slide: targetSlide, placeholders: slideData.placeholders };
     } finally {
-      await browser.close();
+      if (page) {
+        await page.close().catch(() => {});
+      }
+      if (shouldCloseContext) {
+        await context.close().catch(() => {});
+      }
+      if (shouldCloseBrowser) {
+        await browser.close();
+      }
     }
-
-    // Collect all validation errors
-    if (bodyDimensions.errors && bodyDimensions.errors.length > 0) {
-      validationErrors.push(...bodyDimensions.errors);
-    }
-
-    const dimensionErrors = validateDimensions(bodyDimensions, pres);
-    if (dimensionErrors.length > 0) {
-      validationErrors.push(...dimensionErrors);
-    }
-
-    const textBoxPositionErrors = validateTextBoxPosition(slideData, bodyDimensions);
-    if (textBoxPositionErrors.length > 0) {
-      validationErrors.push(...textBoxPositionErrors);
-    }
-
-    if (slideData.errors && slideData.errors.length > 0) {
-      validationErrors.push(...slideData.errors);
-    }
-
-    // Throw all errors at once if any exist
-    if (validationErrors.length > 0) {
-      const errorMessage = validationErrors.length === 1
-        ? validationErrors[0]
-        : `Multiple validation errors found:\n${validationErrors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}`;
-      throw new Error(errorMessage);
-    }
-
-    const targetSlide = slide || pres.addSlide();
-
-    await addBackground(slideData, targetSlide, tmpDir);
-    addElements(slideData, targetSlide, pres);
-
-    return { slide: targetSlide, placeholders: slideData.placeholders };
   } catch (error) {
     if (!error.message.startsWith(htmlFile)) {
       throw new Error(`${htmlFile}: ${error.message}`);

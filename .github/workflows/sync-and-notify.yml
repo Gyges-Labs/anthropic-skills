@@ -1,0 +1,69 @@
+# Sync fork from upstream & notify odin-fastapi
+#
+# Two responsibilities:
+#   1. (schedule/manual) Merge upstream anthropics/skills into dev
+#   2. (push to dev/main) Notify odin-fastapi to update its submodule pointer
+#
+# Prerequisites:
+#   - The GitHub App (RELEASE_SYNC_APP_ID) must be installed on both
+#     anthropic-skills and odin-fastapi repos in the Gyges-Labs org
+
+name: Sync upstream & notify odin-fastapi
+
+on:
+  schedule:
+    - cron: "15 9 * * 1"
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+jobs:
+  sync-upstream:
+    name: Merge upstream into dev
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_SYNC_APP_ID }}
+          private-key: ${{ secrets.RELEASE_SYNC_APP_PRIVATE_KEY }}
+
+      - name: Merge upstream into fork
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          RESPONSE=$(gh api repos/Gyges-Labs/anthropic-skills/merge-upstream \
+            --method POST \
+            --field branch=dev 2>&1) || true
+
+          if echo "$RESPONSE" | grep -q "Successfully merged"; then
+            echo "Fork synced: new commits merged from upstream"
+          elif echo "$RESPONSE" | grep -q "already up-to-date"; then
+            echo "Fork already up to date with upstream"
+          else
+            echo "Fork sync returned: $RESPONSE"
+          fi
+
+  notify-odin:
+    name: Notify odin-fastapi
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create app token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_SYNC_APP_ID }}
+          private-key: ${{ secrets.RELEASE_SYNC_APP_PRIVATE_KEY }}
+          repositories: odin-fastapi
+
+      - name: Dispatch skills-updated event
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh api repos/Gyges-Labs/odin-fastapi/dispatches \
+            --method POST \
+            --field event_type=skills-updated
+          echo "Dispatched skills-updated to odin-fastapi"

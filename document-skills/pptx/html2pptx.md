@@ -2,6 +2,12 @@
 
 Convert HTML slides to PowerPoint presentations with accurate positioning using the `html2pptx.js` library.
 
+If you just need a deck of slides (including charts as PNG images), prefer:
+
+```bash
+node /home/user/skills/pptx/scripts/build_deck.js --out output.pptx slides/*.html
+```
+
 ## Table of Contents
 
 1. [Creating HTML Slides](#creating-html-slides)
@@ -19,6 +25,129 @@ Every HTML slide must include proper body dimensions:
 - **16:9** (default): `width: 720pt; height: 405pt`
 - **4:3**: `width: 720pt; height: 540pt`
 - **16:10**: `width: 720pt; height: 450pt`
+
+### Recommended Starter Template (Safe Area + CSS Reset)
+
+Most overflow/margin issues come from browser default spacing (`body` has an 8px margin, headers/paragraphs have large default margins) and from using `padding` on `body` with default `box-sizing: content-box`.
+
+Use this boilerplate and only edit inside `<div class="safe">...</div>`:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+/* Slide dimensions (must match pptx.layout) */
+:root {
+  --slide-w: 720pt;
+  --slide-h: 405pt;
+  /* Safe area (bottom must be >= 36pt to satisfy html2pptx validation) */
+  --safe-top: 24pt;
+  --safe-right: 30pt;
+  --safe-bottom: 36pt;
+  --safe-left: 30pt;
+  --gap: 12pt;
+}
+
+/* Hard reset: remove default margins/padding that cause overflow */
+* { box-sizing: border-box; }
+html, body { width: var(--slide-w); height: var(--slide-h); margin: 0; padding: 0; }
+
+body {
+  display: flex; /* prevents margin collapse from breaking overflow validation */
+  background: #ffffff;
+  font-family: Arial, sans-serif;
+}
+
+/* Everything goes inside .safe so you always respect slide boundaries */
+.safe {
+  width: 100%;
+  height: 100%;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+/* Self-fitting image areas (prevents "image too tall" overflow) */
+.hero {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hero img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 14pt;
+}
+
+/* Two-column layout: text + image (common and hard to break) */
+.cols {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 18pt;
+  align-items: stretch;
+}
+.col { min-height: 0; }
+.col-img {
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.col-img img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+  border-radius: 14pt;
+}
+
+/* Remove default text margins (you control spacing via .safe gap) */
+h1, h2, h3, p, ul, ol { margin: 0; padding: 0; }
+ul, ol { padding-left: 28pt; } /* list indent */
+</style>
+</head>
+<body>
+  <div class="safe">
+    <h1>Slide Title</h1>
+    <p>One clear idea per slide. Keep paragraphs short.</p>
+    <div class="hero">
+      <img src="image.png" alt="Slide image">
+    </div>
+  </div>
+</body>
+</html>
+```
+
+#### Example Pattern: Two-Column (Bullets + Image)
+
+This pattern avoids overflow by giving the image a self-fitting column.
+
+```html
+<div class="safe">
+  <h1>Nutritional Powerhouse</h1>
+  <div class="cols">
+    <div class="col">
+      <p><b>Why bananas work:</b></p>
+      <ul>
+        <li>Fast energy (carbs + fiber)</li>
+        <li>Potassium for muscle function</li>
+        <li>Vitamin B6 for metabolism</li>
+        <li>Easy, portable snack</li>
+      </ul>
+    </div>
+    <div class="col col-img">
+      <img src="banana_slide2.png" alt="Bananas">
+    </div>
+  </div>
+</div>
+```
 
 ### Supported Elements
 
@@ -50,7 +179,8 @@ Every HTML slide must include proper body dimensions:
 ### Styling
 
 - Use `display: flex` on body to prevent margin collapse from breaking overflow validation
-- Use `margin` for spacing (padding included in size)
+- Prefer spacing via container `gap` / element `margin`; avoid `padding` on `body` unless you set `box-sizing: border-box` (body padding + default content-box often causes overflow)
+- Always reset default margins on text tags (`h1`, `p`, `ul`, etc.) — browser defaults are large and commonly trigger overflow
 - Inline formatting: Use `<b>`, `<i>`, `<u>` tags OR `<span>` with CSS styles
   - `<span>` supports: `font-weight: bold`, `font-style: italic`, `text-decoration: underline`, `color: #rrggbb`
   - `<span>` does NOT support: `margin`, `padding` (not supported in PowerPoint text runs)
@@ -208,6 +338,14 @@ if (placeholders.length > 0) {
 await pptx.writeFile('output.pptx');
 ```
 
+### Fast Path (Recommended): Build a Deck from HTML Files
+
+If you don't need custom placeholder logic, use the built-in CLI wrapper:
+
+```bash
+node /home/user/skills/pptx/scripts/build_deck.js --out output.pptx slides/*.html
+```
+
 ### API Reference
 
 #### Function Signature
@@ -243,6 +381,13 @@ The library automatically validates and collects all errors before throwing:
 4. **Text element styling** - Reports backgrounds/borders/shadows on text elements (only allowed on divs)
 
 **All validation errors are collected and reported together** in a single error message, allowing you to fix all issues at once instead of one at a time.
+
+**Debugging tip**: When iterating on layout issues, pass `debug: true` to save an HTML screenshot for inspection:
+
+```javascript
+await html2pptx('slides/slide1.html', pptx, { debug: true });
+// On error: prints "Debug screenshot: <cwd>/workspace/html2pptx_debug/..."
+```
 
 ### Working with Placeholders
 
