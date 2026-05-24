@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      :root {
+        --slide-w: 720pt;
+        --slide-h: 405pt;
+        --safe-top: 28pt;
+        --safe-right: 36pt;
+        --safe-bottom: 30pt;
+        --safe-left: 36pt;
+        --bg: #f6f7f4;
+        --ink: #14171a;
+        --muted: #65706c;
+        --accent: #e05d3f;
+        --support: #0b7c75;
+        --plum: #6d597a;
+        --panel: #ffffff;
+        --line: #d7ddd5;
+        --charcoal: #151b1f;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: var(--slide-w);
+        height: var(--slide-h);
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        display: flex;
+        background: var(--bg);
+        font-family: Arial, Helvetica, sans-serif;
+        color: var(--ink);
+      }
+
+      h1,
+      h2,
+      p,
+      ul,
+      li {
+        margin: 0;
+        padding: 0;
+      }
+
+      .safe {
+        width: 100%;
+        height: 100%;
+        padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+        display: flex;
+        flex-direction: column;
+        gap: 15pt;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .page-rule {
+        position: absolute;
+        left: var(--safe-left);
+        right: var(--safe-right);
+        bottom: 20pt;
+        height: 1pt;
+        background: var(--line);
+      }
+
+      .topline {
+        display: flex;
+        align-items: center;
+        gap: 9pt;
+      }
+
+      .accent {
+        width: 34pt;
+        height: 4pt;
+        background: var(--accent);
+      }
+
+      .label {
+        font-size: 8.5pt;
+        line-height: 1;
+        color: var(--muted);
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        max-width: 610pt;
+        font-size: 31pt;
+        line-height: 1.06;
+        letter-spacing: 0;
+        color: var(--ink);
+      }
+
+      .cols {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 266pt;
+        gap: 14pt;
+      }
+
+      .left,
+      .right {
+        min-height: 0;
+        border-radius: 8pt;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .left {
+        background: var(--panel);
+        border: 1pt solid var(--line);
+        padding: 16pt 17pt;
+        gap: 10pt;
+      }
+
+      .left-bar {
+        width: 48pt;
+        height: 4pt;
+        background: var(--support);
+      }
+
+      .right {
+        background: var(--charcoal);
+        color: #ffffff;
+        padding: 17pt;
+        gap: 12pt;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .right-accent {
+        position: absolute;
+        right: 0;
+        top: 0;
+        width: 68pt;
+        height: 8pt;
+        background: var(--accent);
+      }
+
+      .lead {
+        font-size: 13.2pt;
+        line-height: 1.3;
+        color: var(--muted);
+      }
+
+      ul {
+        display: flex;
+        flex-direction: column;
+        gap: 6pt;
+        padding-left: 0;
+        list-style: none;
+      }
+
+      li {
+        position: relative;
+        padding-left: 17pt;
+        font-size: 12.5pt;
+        line-height: 1.22;
+        color: var(--ink);
+      }
+
+      li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 4.5pt;
+        width: 7pt;
+        height: 7pt;
+        background: var(--accent);
+      }
+
+      .right .label {
+        color: #b7c5c1;
+      }
+
+      .metric {
+        font-size: 38pt;
+        line-height: 0.92;
+        font-weight: 700;
+        color: #ffffff;
+      }
+
+      .rule {
+        width: 100%;
+        height: 1pt;
+        background: #3d484d;
+      }
+
+      h2 {
+        font-size: 17pt;
+        line-height: 1.15;
+        color: #ffffff;
+      }
+
+      .support {
+        font-size: 12.4pt;
+        line-height: 1.32;
+        color: #dfe7e4;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="safe">
+      <div class="page-rule"></div>
+
+      <div class="topline">
+        <div class="accent"></div>
+        <p class="label">{{SECTION}}</p>
+      </div>
+
+      <h1>{{TITLE}}</h1>
+
+      <div class="cols">
+        <div class="left">
+          <div class="left-bar"></div>
+          <p class="lead">{{LEAD_IN}}</p>
+          <ul>
+            <li>{{BULLET_1}}</li>
+            <li>{{BULLET_2}}</li>
+            <li>{{BULLET_3}}</li>
+            <li>{{BULLET_4}}</li>
+          </ul>
+        </div>
+
+        <div class="right">
+          <div class="right-accent"></div>
+          <p class="label">{{PANEL_LABEL}}</p>
+          <p class="metric">{{METRIC}}</p>
+          <div class="rule"></div>
+          <h2>{{PANEL_TITLE}}</h2>
+          <p class="support">{{PANEL_TEXT}}</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
