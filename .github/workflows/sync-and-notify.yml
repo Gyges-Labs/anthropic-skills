@@ -34,16 +34,24 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          STATUS=0
           RESPONSE=$(gh api repos/Gyges-Labs/anthropic-skills/merge-upstream \
             --method POST \
-            --field branch=dev 2>&1) || true
+            --field branch=dev 2>&1) || STATUS=$?
 
           if echo "$RESPONSE" | grep -q "Successfully merged"; then
             echo "Fork synced: new commits merged from upstream"
           elif echo "$RESPONSE" | grep -q "already up-to-date"; then
             echo "Fork already up to date with upstream"
+          elif echo "$RESPONSE" | grep -q '"status":"409"'; then
+            echo "::error::Fork sync failed due to merge conflicts: $RESPONSE"
+            exit 1
+          elif [ "$STATUS" -ne 0 ]; then
+            echo "::error::Fork sync failed: $RESPONSE"
+            exit 1
           else
-            echo "Fork sync returned: $RESPONSE"
+            echo "::error::Fork sync returned unexpected response: $RESPONSE"
+            exit 1
           fi
 
   notify-odin:
