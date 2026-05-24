@@ -12,7 +12,9 @@ license: Proprietary. LICENSE.txt has complete terms
 |------|-------|
 | Read/analyze content | `python -m markitdown presentation.pptx` |
 | Edit or create from template | Read [editing.md](editing.md) |
+| Create a designed deck quickly | Use [Designed Deck Templates](#designed-deck-templates-fast-path) |
 | Create from scratch | Read [pptxgenjs.md](pptxgenjs.md) |
+| Custom HTML slides | Read [html2pptx.md](html2pptx.md) |
 
 ---
 
@@ -40,11 +42,81 @@ python scripts/office/unpack.py presentation.pptx unpacked/
 
 ---
 
+## Designed Deck Templates (Fast Path)
+
+Use this path when the user asks for a new polished deck and does not provide
+an existing `.pptx` template. It keeps long decks consistent without hand-writing
+custom CSS for every slide.
+The bundled templates are intentionally editorial: asymmetric title pages, dark
+chapter breaks, proof-card grids, and restrained color accents.
+
+1. Decide the deck's audience, tone, and one visual system:
+   - palette: 1 dark neutral, 1 light background, 1 accent, 1 support color
+   - typography: one font family, clear title/body scale, no default-looking pages
+   - layout rhythm: alternate title, narrative, evidence, section, and recap slides
+2. Create one compact JSON plan under `.scratch/`. If the user asks for an
+   exact slide count, include `expected_slide_count` at the top level.
+3. Build the deck with the bundled templates:
+
+```bash
+node /home/user/skills/pptx/scripts/build_from_plan.js .scratch/deck.json base/output.pptx
+```
+
+When the user asks for an exact count, append `--expect-slides N` to the build
+command. The build must fail if the plan or rendered HTML slide count is wrong.
+
+`build_from_plan.js` renders HTML, validates every slide, builds an intermediate
+PPTX under `.scratch/`, and copies the final deck to the requested `base/*.pptx`
+path. After building, save the deck by calling the `workspace_push_to_drive` tool
+with `path: "base/output.pptx"`. Do not write `workspace_push_to_drive(...)` or
+`save_output=...` inside a shell command.
+
+Template roles:
+
+- `title_hero`: opening slide or major story reset.
+- `section_divider`: chapter break every 4-6 slides.
+- `two_col`: default narrative slide with supporting proof or callout.
+- `metric_grid`: 2x2 evidence, decisions, principles, or comparisons.
+- `recap`: final takeaways and action.
+
+For decks longer than five slides, do not repeat the same body slide layout.
+Use a rhythm such as: title hero -> two column -> metric grid -> section divider
+-> two column -> metric grid -> recap. Vary content density, accent placement,
+and dark/light emphasis using the shared templates instead of custom per-slide
+CSS.
+
+Template field aliases:
+
+- Slide specs can use `template`, `layout`, or `type` for the template name.
+  Values may be nested under `values` or written as top-level lower-case fields
+  such as `title`, `subtitle`, `content`, `metric_label_1`, and `bullets`.
+- `two_col`: use `LEAD_IN` plus `BULLET_1` through `_4`, or natural fields
+  such as `content` and `bullets`. Add `PANEL_TEXT` or `callout` when the right
+  panel needs a specific takeaway.
+- `metric_grid`: use `METRIC_1`, `METRIC_LABEL_1`, and `METRIC_TEXT_1`
+  through `_4`. `HEADER_1`/`TEXT_1`, `PANEL_1_TITLE`/`PANEL_1_TEXT`, and
+  `CARD_1_TITLE`/`CARD_1_TEXT` are accepted aliases. A `metrics`, `cards`, or
+  `items` array with `label`/`title` and `text`/`body` fields is also accepted.
+- `recap`: use `TAKEAWAY_1` through `_4`. `BULLET_1` through `_4` are accepted
+  aliases. Include `ACTION_TEXT` when the user needs a concrete next step.
+
+Clean `.scratch/slides` before re-rendering if you are not using
+`render_templates.js`, so stale HTML files do not get included by the `*.html`
+glob. If the prompt says "minimal", keep the JSON content minimal; do not strip
+the template styling, dimensions, or safe layout.
+
+For deeper design direction, read `references/deck-design.md`. If the user asks
+for a specific theme and the `theme-factory` skill is available, consult it for
+palette and typography. If the deck must follow Anthropic brand style and
+`brand-guidelines` is available, consult that skill before choosing colors.
+
+---
+
 ## Creating from Scratch
 
 **Read [pptxgenjs.md](pptxgenjs.md) for full details.**
 
-Use when no template or reference presentation is available.
+Use when the bundled templates cannot express the needed layout or interaction.
 
 ---
 
@@ -228,5 +300,6 @@ pdftoppm -jpeg -r 150 -f N -l N output.pdf slide-fixed
 - `pip install "markitdown[pptx]"` - text extraction
 - `pip install Pillow` - thumbnail grids
 - `npm install -g pptxgenjs` - creating from scratch
+- `npm install -g playwright sharp` - HTML template rendering
 - LibreOffice (`soffice`) - PDF conversion (auto-configured for sandboxed environments via `scripts/office/soffice.py`)
 - Poppler (`pdftoppm`) - PDF to images
